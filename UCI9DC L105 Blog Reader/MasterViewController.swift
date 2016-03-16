@@ -17,15 +17,76 @@ class MasterViewController: UITableViewController, NSFetchedResultsControllerDel
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        // Do any additional setup after loading the view, typically from a nib.
-        self.navigationItem.leftBarButtonItem = self.editButtonItem()
 
-        let addButton = UIBarButtonItem(barButtonSystemItem: .Add, target: self, action: "insertNewObject:")
-        self.navigationItem.rightBarButtonItem = addButton
+        loadData()
+
         if let split = self.splitViewController {
             let controllers = split.viewControllers
             self.detailViewController = (controllers[controllers.count-1] as! UINavigationController).topViewController as? DetailViewController
         }
+    }
+
+    private func loadData() {
+        let url = NSURL(string: "https://www.googleapis.com/blogger/v3/blogs/10861780/posts?key=AIzaSyDCuEtQqcIcrTIiz4o8wnVc6KSGDE_f8XQ")!
+        let session = NSURLSession.sharedSession()
+
+        let task = session.dataTaskWithURL(url) { (data, response, error) -> Void in
+            if let error = error {
+                NSLog("Error downloading: \(error.localizedDescription)")
+            } else {
+                guard let data = data else {
+                    NSLog("Data is empty")
+                    return
+                }
+                var jsonData = NSDictionary()
+                do {
+                    jsonData = try NSJSONSerialization.JSONObjectWithData(data, options: .MutableContainers) as! NSDictionary
+                } catch let error {
+                    NSLog("JSON serialization failed. Error: \(error)")
+                    return
+                }
+                guard let items = jsonData["items"] as? NSArray else {
+                    NSLog("items key is not found in the downloaded data")
+                    return
+                }
+                self.storeItemsToDb(items)
+            }
+        }
+        task.resume()
+    }
+
+    private func storeItemsToDb(items: NSArray) {
+        let appDelegate = UIApplication.sharedApplication().delegate as! AppDelegate
+        let context = appDelegate.managedObjectContext
+
+        let request = NSFetchRequest(entityName: "BlogItem")
+        request.returnsObjectsAsFaults = false
+        do {
+            let results = try context.executeFetchRequest(request)
+            if results.count > 0 {
+                for result in results {
+                    context.deleteObject(result as! NSManagedObject)
+                }
+                try context.save()
+            }
+        } catch let error {
+            NSLog("Error executing request. Error: \(error)")
+        }
+
+        for item in items {
+            guard let title = item["title"] as? String, content = item["content"] as? String else {
+                continue
+            }
+            let newPost = NSEntityDescription.insertNewObjectForEntityForName("BlogItem", inManagedObjectContext: context)
+            newPost.setValue(title, forKey: "title")
+            newPost.setValue(content, forKey: "content")
+        }
+
+//        do {
+//            try context.save()
+//        } catch let error {
+//            NSLog("Unable to save context. Error: \(error).")
+//        }
     }
 
     override func viewWillAppear(animated: Bool) {
@@ -36,26 +97,6 @@ class MasterViewController: UITableViewController, NSFetchedResultsControllerDel
     override func didReceiveMemoryWarning() {
         super.didReceiveMemoryWarning()
         // Dispose of any resources that can be recreated.
-    }
-
-    func insertNewObject(sender: AnyObject) {
-        let context = self.fetchedResultsController.managedObjectContext
-        let entity = self.fetchedResultsController.fetchRequest.entity!
-        let newManagedObject = NSEntityDescription.insertNewObjectForEntityForName(entity.name!, inManagedObjectContext: context)
-             
-        // If appropriate, configure the new managed object.
-        // Normally you should use accessor methods, but using KVC here avoids the need to add a custom class to the template.
-        newManagedObject.setValue(NSDate(), forKey: "timeStamp")
-             
-        // Save the context.
-        do {
-            try context.save()
-        } catch {
-            // Replace this implementation with code to handle the error appropriately.
-            // abort() causes the application to generate a crash log and terminate. You should not use this function in a shipping application, although it may be useful during development.
-            //print("Unresolved error \(error), \(error.userInfo)")
-            abort()
-        }
     }
 
     // MARK: - Segues
@@ -112,7 +153,7 @@ class MasterViewController: UITableViewController, NSFetchedResultsControllerDel
 
     func configureCell(cell: UITableViewCell, atIndexPath indexPath: NSIndexPath) {
         let object = self.fetchedResultsController.objectAtIndexPath(indexPath)
-        cell.textLabel!.text = object.valueForKey("timeStamp")!.description
+        cell.textLabel!.text = object.valueForKey("title")!.description
     }
 
     // MARK: - Fetched results controller
@@ -124,14 +165,14 @@ class MasterViewController: UITableViewController, NSFetchedResultsControllerDel
         
         let fetchRequest = NSFetchRequest()
         // Edit the entity name as appropriate.
-        let entity = NSEntityDescription.entityForName("Event", inManagedObjectContext: self.managedObjectContext!)
+        let entity = NSEntityDescription.entityForName("BlogItem", inManagedObjectContext: self.managedObjectContext!)
         fetchRequest.entity = entity
         
         // Set the batch size to a suitable number.
         fetchRequest.fetchBatchSize = 20
         
         // Edit the sort key as appropriate.
-        let sortDescriptor = NSSortDescriptor(key: "timeStamp", ascending: false)
+        let sortDescriptor = NSSortDescriptor(key: "title", ascending: false)
         
         fetchRequest.sortDescriptors = [sortDescriptor]
         
